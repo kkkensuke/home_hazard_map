@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Tiled Hazard Map with Markers</title>
+  <meta name="viewport" content="initial-scale=1.0">
+  <meta charset="utf-8">
+  <style>
+    #map {
+      height: 600px;
+      width: 100%;
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+    .controls {
+      background-color: #fff;
+      border-radius: 2px;
+      border: 1px solid #ccc;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      margin: 10px;
+      padding: 10px;
+      position: absolute;
+      z-index: 1;
+    }
+    .marker-info {
+      margin-top: 15px;
+      padding-top: 10px;
+      border-top: 1px solid #ccc;
+    }
+    #markerList {
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 10px;
+    }
+    .marker-item {
+      padding: 5px;
+      margin-bottom: 5px;
+      background-color: #f0f0f0;
+      border-radius: 3px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .marker-item button {
+      background: #ff4d4d;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      margin-left: 5px;
+    }
+    .memo-input {
+      width: 100%;
+      margin-top: 5px;
+      margin-bottom: 5px;
+      padding: 5px;
+      border-radius: 3px;
+      border: 1px solid #ccc;
+    }
+    .memo-text {
+      font-style: italic;
+      font-size: 0.9em;
+      color: #555;
+      margin-top: 3px;
+    }
+    .info-window-content {
+      max-width: 250px;
+    }
+    .status-message {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 10px 20px;
+      background-color: rgba(0, 0, 0, 0.7);
+      color: white;
+      border-radius: 5px;
+      z-index: 1000;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="controls">
+    <h3>Hazard Map Controls</h3>
+    <div>
+      <input type="checkbox" id="toggleHazard" checked>
+      <label for="toggleHazard">Show Hazard Map</label>
+    </div>
+    <div>
+      <label for="opacitySlider">Overlay Opacity: </label>
+      <input type="range" id="opacitySlider" min="0" max="1" step="0.1" value="0.7">
+      <span id="opacityValue">0.7</span>
+    </div>
+    <div>
+      <select id="hazardType">
+        <option value="flood">Flood Hazard</option>
+        <option value="earthquake">Earthquake Hazard</option>
+        <option value="landslide">Landslide Hazard</option>
+      </select>
+      <button id="changeHazard">Change Hazard Type</button>
+    </div>
+    
+    <div class="marker-info">
+      <h4>Add Markers</h4>
+      <div>
+        <input type="text" id="markerTitle" placeholder="Marker Title">
+        <select id="markerType">
+          <option value="default">Default</option>
+          <option value="important">Important</option>
+          <option value="evacuation">Evacuation Point</option>
+        </select>
+        <button id="addMarkerBtn">Add Marker Mode</button>
+        <button id="cancelMarkerBtn" style="display:none;">Cancel</button>
+      </div>
+      <p id="markerInstructions" style="display:none; font-style:italic;">Click on the map to place a marker</p>
+      
+      <h4>Saved Markers</h4>
+      <div id="markerList"></div>
+    </div>
+  </div>
+  
+  <div id="statusMessage" class="status-message"></div>
+
+  <script>
+    // Initialize the map and overlay variables
+    let map;
+    let hazardOverlay;
+    let currentHazardType = "flood";
+    let markers = [];
+    let addingMarker = false;
+    let hazardIndex = -1;
+    let markerIcons = {}; // Moved here to define after Google Maps loads
+
+    // Base URLs for different hazard types
+    const hazardUrls = {
+      flood: "https://disaportaldata.gsi.go.jp/raster/01_flood_l2_shinsuishin_data/{z}/{x}/{y}.png",
+      earthquake: "https://example.com/earthquake/{z}/{x}/{y}.png", // Replace with actual URL
+      landslide: "https://example.com/landslide/{z}/{x}/{y}.png"    // Replace with actual URL
+    };
+    
+    function initMap() {
+      // Initialize marker icons after Google Maps loads
+      markerIcons = {
+        default: null, // Use default Google Maps marker
+        important: {
+          url: "http://maps.google.com/mapfiles/ms/icons/red-dot.png",
+          scaledSize: new google.maps.Size(32, 32)
+        },
+        evacuation: {
+          url: "http://maps.google.com/mapfiles/ms/icons/green-dot.png",
+          scaledSize: new google.maps.Size(32, 32)
+        }
+      };
+      
+      // Create a new map centered on a location in Japan
+      map = new google.maps.Map(document.getElementById('map'), {
+        center: {lat: 35.904148, lng: 139.635717}, // Omiya
+        zoom: 12,
+        mapTypeId: 'terrain'
+      });
+
+      // Add the initial hazard overlay
+      addHazardOverlay(currentHazardType);
+      
+      // Set up event listeners for controls
+      document.getElementById('toggleHazard').addEventListener('change', function() {
+        if (this.checked) {
+          // Only add if not already added
+          if (hazardIndex === -1) {
+            map.overlayMapTypes.push(hazardOverlay);
+            hazardIndex = map.overlayMapTypes.getLength() - 1;
+          }
+        } else {
+          // Find and remove the overlay
+          if (hazardIndex !== -1) {
+            map.overlayMapTypes.removeAt(hazardIndex);
+            hazardIndex = -1;
+          }
+        }
+      });
+
+      const opacitySlider = document.getElementById('opacitySlider');
+      const opacityValue = document.getElementById('opacityValue');
+      opacitySlider.addEventListener('input', function() {
+        const opacity = parseFloat(this.value);
+        // Use correct method to set opacity for ImageMapType
+        if (hazardIndex !== -1) {
+          const overlay = map.overlayMapTypes.getAt(hazardIndex);
+          overlay.setOpacity(opacity);
+          opacityValue.textContent = opacity.toFixed(1);
+        }
+      });
+
+      document.getElementById('changeHazard').addEventListener('click', function() {
+        const select = document.getElementById('hazardType');
+        currentHazardType = select.value;
+        
+        // Remove old overlay
+        if (hazardIndex !== -1) {
+          map.overlayMapTypes.removeAt(hazardIndex);
+          hazardIndex = -1;
+        }
+        
+        // Add new overlay
+        addHazardOverlay(currentHazardType);
+      });
+      
+      // Set up marker controls
+      document.getElementById('addMarkerBtn').addEventListener('click', function() {
+        addingMarker = true;
+        document.getElementById('markerInstructions').style.display = 'block';
+        document.getElementById('addMarkerBtn').style.display = 'none';
+        document.getElementById('cancelMarkerBtn').style.display = 'inline';
+      });
+      
+      document.getElementById('cancelMarkerBtn').addEventListener('click', function() {
+        addingMarker = false;
+        document.getElementById('markerInstructions').style.display = 'none';
+        document.getElementById('addMarkerBtn').style.display = 'inline';
+        document.getElementById('cancelMarkerBtn').style.display = 'none';
+      });
+      
+      // Add click listener to the map for adding markers
+      map.addListener('click', function(event) {
+        if (addingMarker) {
+          const title = document.getElementById('markerTitle').value || 'Marker';
+          const type = document.getElementById('markerType').value;
+          addMarker(event.latLng, title, type, '');
+          
+          // Reset marker mode
+          addingMarker = false;
+          document.getElementById('markerInstructions').style.display = 'none';
+          document.getElementById('addMarkerBtn').style.display = 'inline';
+          document.getElementById('cancelMarkerBtn').style.display = 'none';
+        }
+      });
+      
+      // Load saved markers from database
+      loadMarkers();
+    }
+
+    function addHazardOverlay(hazardType) {
+      // Create a custom tile overlay
+      hazardOverlay = new google.maps.ImageMapType({
+        getTileUrl: function(coord, zoom) {
+          // Replace template values in URL
+          return hazardUrls[hazardType]
+            .replace('{z}', zoom)
+            .replace('{x}', coord.x)
+            .replace('{y}', coord.y);
+        },
+        tileSize: new google.maps.Size(256, 256),
+        maxZoom: 19,
+        minZoom: 0,
+        name: hazardType + ' Hazard',
+        opacity: parseFloat(document.getElementById('opacitySlider').value)
+      });
+      
+      // Add overlay to map
+      map.overlayMapTypes.push(hazardOverlay);
+      hazardIndex = map.overlayMapTypes.getLength() - 1;
+    }
+    
+    function addMarker(location, title, type, memo, id = null) {
+      // Create a new marker
+      const marker = new google.maps.Marker({
+        position: location,
+        map: map,
+        title: title,
+        icon: markerIcons[type],
+        animation: google.maps.Animation.DROP
+      });
+      
+      // Prepare info window content with memo field
+      const infoWindowContent = document.createElement('div');
+      infoWindowContent.className = 'info-window-content';
+      infoWindowContent.innerHTML = `
+        <div>
+          <strong>${title}</strong><br>
+          Type: ${type}<br>
+          Lat: ${location.lat().toFixed(6)}<br>
+          Lng: ${location.lng().toFixed(6)}<br>
+          <div class="memo-container">
+            <label for="memo-${id || Date.now()}">Memo:</label>
+            <textarea id="memo-${id || Date.now()}" class="memo-input" rows="3">${memo}</textarea>
+            <button class="save-memo-btn">Save Memo</button>
+          </div>
+        </div>
+      `;
+      
+      // Create info window with marker details
+      const infoWindow = new google.maps.InfoWindow({
+        content: infoWindowContent
+      });
+      
+      // Add click listener to open info window
+      marker.addListener('click', function() {
+        infoWindow.open(map, marker);
+        
+        // Add event listener to save memo button after InfoWindow is open
+        setTimeout(() => {
+          const saveBtn = document.querySelector('.save-memo-btn');
+          if (saveBtn) {
+            saveBtn.addEventListener('click', function() {
+              const textArea = document.querySelector(`#memo-${id || Date.now()}`);
+              console.log("Selected textArea:", textArea); // Debugging
+              const updatedMemo = textArea.value;
+              
+              // Update marker data in memory
+              const markerIndex = markers.findIndex(m => 
+                m.position.lat() === location.lat() && 
+                m.position.lng() === location.lng()
+              );
+              
+              if (markerIndex !== -1) {
+                markers[markerIndex].memo = updatedMemo;
+                
+                // Save to database
+                saveMarkerToDatabase(markers[markerIndex]);
+                
+                // Update marker list in UI
+                updateMarkerList();
+              }
+            });
+          }
+        }, 300);
+      });
+      
+      // Save marker data
+      const markerData = {
+        id: id || null, // Will be set when saved to database
+        marker: marker,
+        infoWindow: infoWindow,
+        title: title,
+        type: type,
+        memo: memo,
+        position: location
+      };
+      markers.push(markerData);
+      
+      // Save to database
+      if (!id) { // Only save if this is a new marker (not loaded from DB)
+        saveMarkerToDatabase(markerData);
+      }
+      
+      // Add to marker list in UI
+      updateMarkerList();
+      
+      // Clear input field
+      document.getElementById('markerTitle').value = '';
+      
+      return marker;
+    }
+    
+    function updateMarkerList() {
+      const markerList = document.getElementById('markerList');
+      markerList.innerHTML = '';
+      
+      if (markers.length === 0) {
+        markerList.innerHTML = '<p>No markers added yet</p>';
+        return;
+      }
+      
+      markers.forEach((markerData, index) => {
+        const markerItem = document.createElement('div');
+        markerItem.className = 'marker-item';
+        
+        // Create marker list item
+        let markerItemContent = `
+          <div>
+            <span>${markerData.title} (${markerData.type})</span>
+        `;
+        
+        // Add memo preview if exists
+        if (markerData.memo && markerData.memo.trim() !== '') {
+          const memoPreview = markerData.memo.length > 20 
+            ? markerData.memo.substring(0, 20) + '...' 
+            : markerData.memo;
+          markerItemContent += `<div class="memo-text">${memoPreview}</div>`;
+        }
+        
+        markerItemContent += `</div>
+          <div>
+            <button class="view-marker" data-index="${index}">View</button>
+            <button class="delete-marker" data-index="${index}">Remove</button>
+          </div>
+        `;
+        
+        markerItem.innerHTML = markerItemContent;
+        markerList.appendChild(markerItem);
+      });
+      
+      // Add event listeners to delete buttons
+      document.querySelectorAll('.delete-marker').forEach(button => {
+        button.addEventListener('click', function() {
+          const index = parseInt(this.getAttribute('data-index'));
+          
+          // Delete from database
+          deleteMarkerFromDatabase(markers[index].id);
+          
+          // Remove marker from map
+          markers[index].marker.setMap(null);
+          
+          // Remove from array
+          markers.splice(index, 1);
+          
+          // Update list
+          updateMarkerList();
+        });
+      });
+      
+      // Add event listeners to view buttons
+      document.querySelectorAll('.view-marker').forEach(button => {
+        button.addEventListener('click', function() {
+          const index = parseInt(this.getAttribute('data-index'));
+          
+          // Center map on the marker
+          map.setCenter(markers[index].position);
+          
+          // Open info window
+          markers[index].infoWindow.open(map, markers[index].marker);
+        });
+      });
+    }
+    
+    // Database operations
+    function saveMarkerToDatabase(markerData) {
+      // Create data object for AJAX request
+      const data = {
+        title: markerData.title,
+        type: markerData.type,
+        lat: markerData.position.lat(),
+        lng: markerData.position.lng(),
+        memo: markerData.memo || '',
+        id: markerData.id || null
+      };
+      
+      // Send AJAX request to server
+      fetch('save_marker.php', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data)
+      })
+      .then(response => response.json())
+      .then(result => {
+        if (result.success) {
+          // If this was a new marker, update the ID
+          if (!markerData.id) {
+            markerData.id = result.id;
+          }
+          
+          // Show success message
+          showStatusMessage('Marker saved successfully!');
+        } else {
+          showStatusMessage('Error saving marker: ' + result.message, true);
+        }
+      })
+      .catch(error => {
+        console.error('Error saving marker:', error);
+        showStatusMessage('Error saving marker. Please try again.', true);
+      });
+    }
+    
+    function deleteMarkerFromDatabase(markerId) {
+      // Don't proceed if the marker wasn't saved to DB yet
+      if (!markerId) return;
+      
+      // Send AJAX request to server
+      fetch('delete_marker.php', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ id: markerId })
+      })
+      .then(response => response.json())
+      .then(result => {
+        if (result.success) {
+          showStatusMessage('Marker deleted successfully!');
+        } else {
+          showStatusMessage('Error deleting marker: ' + result.message, true);
+        }
+      })
+      .catch(error => {
+        console.error('Error deleting marker:', error);
+        showStatusMessage('Error deleting marker. Please try again.', true);
+      });
+    }
+    
+    function loadMarkers() {
+      // Send AJAX request to server
+      fetch('get_markers.php')
+      .then(response => response.json())
+      .then(result => {
+        if (result.success) {
+          // Clear existing markers if any
+          markers.forEach(marker => marker.marker.setMap(null));
+          markers = [];
+          
+          // Add each marker from the database
+          result.markers.forEach(markerData => {
+            const position = new google.maps.LatLng(
+              parseFloat(markerData.lat),
+              parseFloat(markerData.lng)
+            );
+            
+            addMarker(
+              position,
+              markerData.title,
+              markerData.type,
+              markerData.memo,
+              markerData.id
+            );
+          });
+          
+          showStatusMessage(`Loaded ${result.markers.length} markers`);
+        } else {
+          showStatusMessage('Error loading markers: ' + result.message, true);
+        }
+      })
+      .catch(error => {
+        console.error('Error loading markers:', error);
+        showStatusMessage('Error loading markers. Please try again.', true);
+      });
+    }
+    
+    function showStatusMessage(message, isError = false) {
+      const statusElement = document.getElementById('statusMessage');
+      statusElement.textContent = message;
+      statusElement.style.backgroundColor = isError ? 'rgba(255, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.7)';
+      statusElement.style.display = 'block';
+      
+      // Hide after 3 seconds
+      setTimeout(() => {
+        statusElement.style.display = 'none';
+      }, 3000);
+    }
+  </script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=<YOUR_GOOGLE_MAP_API_KEY>&callback=initMap" async defer></script>
+</body>
+</html>
