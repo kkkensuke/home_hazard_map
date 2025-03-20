@@ -1,6 +1,10 @@
 # home_hazard_map
 utilize hazard map on google map for searching your ideal home location
 
+# How it looks like
+<img width="697" alt="image" src="https://github.com/user-attachments/assets/969663f3-39c2-4ef1-92f0-29bab49f1072" />
+
+
 # Prerequisites
 - installed php for your backend
   - enable `extension=mysqli` at your php.ini file
