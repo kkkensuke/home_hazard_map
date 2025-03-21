@@ -27,6 +27,7 @@ try {
     $lat = floatval($data['lat']);
     $lng = floatval($data['lng']);
     $memo = isset($data['memo']) ? $conn->real_escape_string($data['memo']) : '';
+    $url = isset($data['url']) ? $conn->real_escape_string($data['url']) : '';
     $id = isset($data['id']) && !empty($data['id']) ? intval($data['id']) : null;
 
     // SQL query - insert new marker or update existing one
@@ -37,7 +38,8 @@ try {
                 type = '$type', 
                 lat = $lat, 
                 lng = $lng, 
-                memo = '$memo' 
+                memo = '$memo',
+                url = '$url' 
                 WHERE id = $id";
         
         if ($conn->query($sql) === TRUE) {
@@ -54,8 +56,8 @@ try {
         }
     } else {
         // Insert new marker
-        $sql = "INSERT INTO markers (title, type, lat, lng, memo) 
-                VALUES ('$title', '$type', $lat, $lng, '$memo')";
+        $sql = "INSERT INTO markers (title, type, lat, lng, memo, url) 
+                VALUES ('$title', '$type', $lat, $lng, '$memo', '$url')";
         
         if ($conn->query($sql) === TRUE) {
             $newId = $conn->insert_id;

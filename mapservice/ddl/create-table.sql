@@ -18,3 +18,6 @@ CREATE TABLE IF NOT EXISTS markers (
 
 -- Create index for faster geographic queries
 CREATE INDEX idx_lat_lng ON markers(lat, lng);
+
+-- Added URL feature
+ALTER TABLE markers ADD COLUMN url VARCHAR(255) DEFAULT '';
