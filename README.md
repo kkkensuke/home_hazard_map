@@ -9,7 +9,8 @@ utilize hazard map on google map for searching your ideal home location
 - installed php for your backend
   - enable `extension=mysqli` at your php.ini file
 - installed or prepared your MySQL DB
-- Need Google MAP API Key enable.
+- Need Google MAP API Key enabled.
+- Need GCP Geocoding API Key enabled.
 
 # How to Jump Start
 1. Create Database by running `create-table.sql` under ddl folder.
