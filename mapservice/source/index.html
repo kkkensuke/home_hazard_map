@@ -78,12 +78,55 @@
       z-index: 1000;
       display: none;
     }
+    /* New styles for search box */
+    #search-container {
+      width: 100%;
+      margin-bottom: 15px;
+    }
+    #search-box {
+      width: 70%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+    }
+    #search-button {
+      padding: 8px 15px;
+      background-color: #4285F4;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    /* Style for URL input in marker info */
+    .url-input {
+      width: 100%;
+      margin-top: 5px;
+      margin-bottom: 5px;
+      padding: 5px;
+      border-radius: 3px;
+      border: 1px solid #ccc;
+    }
+    .url-link {
+      color: #0066cc;
+      text-decoration: underline;
+      cursor: pointer;
+      display: block;
+      margin-top: 5px;
+      font-size: 0.9em;
+    }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <div class="controls">
     <h3>Hazard Map Controls</h3>
+    
+    <!-- New search box -->
+    <div id="search-container">
+      <input id="search-box" type="text" placeholder="Search location...">
+      <button id="search-button">Search</button>
+    </div>
+    
     <div>
       <input type="checkbox" id="toggleHazard" checked>
       <label for="toggleHazard">Show Hazard Map</label>
@@ -132,6 +175,7 @@
     let addingMarker = false;
     let hazardIndex = -1;
     let markerIcons = {}; // Moved here to define after Google Maps loads
+    let geocoder; // New geocoder for search functionality
 
     // Base URLs for different hazard types
     const hazardUrls = {
@@ -141,6 +185,9 @@
     };
     
     function initMap() {
+      // Initialize geocoder for search
+      geocoder = new google.maps.Geocoder();
+      
       // Initialize marker icons after Google Maps loads
       markerIcons = {
         default: null, // Use default Google Maps marker
@@ -163,6 +210,18 @@
 
       // Add the initial hazard overlay
       addHazardOverlay(currentHazardType);
+      
+      // Set up search functionality
+      document.getElementById('search-button').addEventListener('click', function() {
+        searchLocation();
+      });
+      
+      // Also allow search on Enter key press
+      document.getElementById('search-box').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          searchLocation();
+        }
+      });
       
       // Set up event listeners for controls
       document.getElementById('toggleHazard').addEventListener('change', function() {
@@ -227,7 +286,7 @@
         if (addingMarker) {
           const title = document.getElementById('markerTitle').value || 'Marker';
           const type = document.getElementById('markerType').value;
-          addMarker(event.latLng, title, type, '');
+          addMarker(event.latLng, title, type, '', '');
           
           // Reset marker mode
           addingMarker = false;
@@ -239,6 +298,33 @@
       
       // Load saved markers from database
       loadMarkers();
+    }
+
+    // New function to search for locations
+    function searchLocation() {
+      const address = document.getElementById('search-box').value;
+      if (!address) {
+        showStatusMessage('Please enter a location to search', true);
+        return;
+      }
+      
+      geocoder.geocode({ 'address': address }, function(results, status) {
+        if (status === 'OK') {
+          if (results[0]) {
+            map.setCenter(results[0].geometry.location);
+            
+            // Zoom in to a reasonable level
+            map.setZoom(14);
+            
+            // Show a brief message
+            showStatusMessage(`Showing results for: ${address}`);
+          } else {
+            showStatusMessage('No results found for your search', true);
+          }
+        } else {
+          showStatusMessage(`Geocoding failed: ${status}`, true);
+        }
+      });
     }
 
     function addHazardOverlay(hazardType) {
@@ -263,7 +349,7 @@
       hazardIndex = map.overlayMapTypes.getLength() - 1;
     }
     
-    function addMarker(location, title, type, memo, id = null) {
+    function addMarker(location, title, type, memo, url = '', id = null) {
       // Create a new marker
       const marker = new google.maps.Marker({
         position: location,
@@ -273,7 +359,10 @@
         animation: google.maps.Animation.DROP
       });
       
-      // Prepare info window content with memo field
+      // Create unique ID for elements
+      const uniqueId = id || Date.now();
+      
+      // Prepare info window content with memo field and URL link
       const infoWindowContent = document.createElement('div');
       infoWindowContent.className = 'info-window-content';
       infoWindowContent.innerHTML = `
@@ -283,10 +372,15 @@
           Lat: ${location.lat().toFixed(6)}<br>
           Lng: ${location.lng().toFixed(6)}<br>
           <div class="memo-container">
-            <label for="memo-${id || Date.now()}">Memo:</label>
-            <textarea id="memo-${id || Date.now()}" class="memo-input" rows="3">${memo}</textarea>
-            <button class="save-memo-btn">Save Memo</button>
+            <label for="memo-${uniqueId}">Memo:</label>
+            <textarea id="memo-${uniqueId}" class="memo-input" rows="3">${memo}</textarea>
           </div>
+          <div class="url-container">
+            <label for="url-${uniqueId}">URL:</label>
+            <input type="text" id="url-${uniqueId}" class="url-input" value="${url}" placeholder="https://example.com">
+            ${url ? `<a href="${url}" target="_blank" class="url-link">Open Link</a>` : ''}
+          </div>
+          <button class="save-memo-btn">Save Changes</button>
         </div>
       `;
       
@@ -299,14 +393,16 @@
       marker.addListener('click', function() {
         infoWindow.open(map, marker);
         
-        // Add event listener to save memo button after InfoWindow is open
+        // Add event listener to save button after InfoWindow is open
         setTimeout(() => {
           const saveBtn = document.querySelector('.save-memo-btn');
           if (saveBtn) {
             saveBtn.addEventListener('click', function() {
-              const textArea = document.querySelector(`#memo-${id || Date.now()}`);
-              console.log("Selected textArea:", textArea); // Debugging
+              const textArea = document.querySelector(`#memo-${uniqueId}`);
               const updatedMemo = textArea.value;
+              
+              const urlInput = document.querySelector(`#url-${uniqueId}`);
+              const updatedUrl = urlInput.value;
               
               // Update marker data in memory
               const markerIndex = markers.findIndex(m => 
@@ -316,12 +412,33 @@
               
               if (markerIndex !== -1) {
                 markers[markerIndex].memo = updatedMemo;
+                markers[markerIndex].url = updatedUrl;
+                
+                // Update URL link display
+                const urlContainer = document.querySelector('.url-container');
+                if (urlContainer) {
+                  // Remove existing link if present
+                  const existingLink = urlContainer.querySelector('.url-link');
+                  if (existingLink) existingLink.remove();
+                  
+                  // Add new link if URL is not empty
+                  if (updatedUrl) {
+                    const urlLink = document.createElement('a');
+                    urlLink.href = updatedUrl;
+                    urlLink.target = '_blank';
+                    urlLink.className = 'url-link';
+                    urlLink.textContent = 'Open Link';
+                    urlContainer.appendChild(urlLink);
+                  }
+                }
                 
                 // Save to database
                 saveMarkerToDatabase(markers[markerIndex]);
                 
                 // Update marker list in UI
                 updateMarkerList();
+                
+                showStatusMessage('Marker updated successfully!');
               }
             });
           }
@@ -336,6 +453,7 @@
         title: title,
         type: type,
         memo: memo,
+        url: url,
         position: location
       };
       markers.push(markerData);
@@ -379,6 +497,11 @@
             ? markerData.memo.substring(0, 20) + '...' 
             : markerData.memo;
           markerItemContent += `<div class="memo-text">${memoPreview}</div>`;
+        }
+        
+        // Add URL indicator if exists
+        if (markerData.url && markerData.url.trim() !== '') {
+          markerItemContent += `<div class="memo-text">🔗 Has link</div>`;
         }
         
         markerItemContent += `</div>
@@ -434,6 +557,7 @@
         lat: markerData.position.lat(),
         lng: markerData.position.lng(),
         memo: markerData.memo || '',
+        url: markerData.url || '',
         id: markerData.id || null
       };
       
@@ -513,6 +637,7 @@
               markerData.title,
               markerData.type,
               markerData.memo,
+              markerData.url || '',
               markerData.id
             );
           });
@@ -540,6 +665,6 @@
       }, 3000);
     }
   </script>
-  <script src="https://maps.googleapis.com/maps/api/js?key=<YOUR_GOOGLE_MAP_API_KEY>&callback=initMap" async defer></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=<Your-API-Key>&callback=initMap" async defer></script>
 </body>
 </html>
